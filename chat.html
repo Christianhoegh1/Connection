@@ -28,19 +28,24 @@ function log(message) {
   logDiv.scrollTop = logDiv.scrollHeight;
 }
 
-// 🌍 Your Render WebSocket Signaling Server URL
+// 🌍 Your Render WebSocket Signaling Server
 const ws = new WebSocket("wss://connection-zhjs.onrender.com");
 
-// WebRTC setup
-let pc = new RTCPeerConnection();
+// 🌐 WebRTC with public STUN (required for global connections)
+let pc = new RTCPeerConnection({
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
+});
+
 let channel;
 
-// send WebRTC signaling data to server
+// Send signaling data to server
 function signal(data) {
   ws.send(JSON.stringify(data));
 }
 
-// receive WebRTC data from server
+// Receive signaling data from server
 ws.onmessage = async event => {
   const data = JSON.parse(event.data);
 
@@ -59,30 +64,31 @@ ws.onmessage = async event => {
   }
 };
 
-// ICE candidates → signaling server
+// Send ICE candidates to signaling server
 pc.onicecandidate = event => {
   if (event.candidate) signal({ candidate: event.candidate });
 };
 
-// When receiving a data channel
+// When receiving a WebRTC data channel
 pc.ondatachannel = event => {
   channel = event.channel;
-  initChannel();
+  setupChannel();
 };
 
-// Create a data channel automatically (one peer will win the race)
+// Create a data channel automatically (one peer wins the race)
 setTimeout(async () => {
   if (pc.connectionState !== "new") return;
+
   channel = pc.createDataChannel("chat");
-  initChannel();
+  setupChannel();
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   signal({ sdp: pc.localDescription });
 }, Math.random() * 800);
 
-// Setup chat channel events
-function initChannel() {
+// Setup the chat channel
+function setupChannel() {
   channel.onopen = () => {
     log("Connected ✔");
     sendBtn.disabled = false;
@@ -96,16 +102,17 @@ function initChannel() {
   };
 }
 
-// Sending chat messages
+// Sending messages
 sendBtn.onclick = () => {
   const text = msgInput.value;
   if (!text || channel.readyState !== "open") return;
+
   channel.send(text);
   log("You: " + text);
   msgInput.value = "";
 };
 
-// Enter key sends message
+// Enter key sends messages
 msgInput.addEventListener("keydown", e => {
   if (e.key === "Enter") sendBtn.click();
 });
