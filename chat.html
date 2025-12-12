@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>P2P Chat (WebRTC)</title>
+  <style>
+    body { font-family: sans-serif; max-width: 700px; margin: 20px auto; }
+    #log { border: 1px solid #aaa; height: 250px; overflow-y: auto; padding: 5px; }
+    input { padding: 6px; }
+    button { padding: 6px 12px; }
+  </style>
+</head>
+<body>
+
+<h2>P2P WebRTC Chat</h2>
+<div id="log"></div>
+
+<input id="msg" placeholder="Type message..." style="width:80%">
+<button id="send" disabled>Send</button>
+
+<script>
+const logDiv = document.getElementById("log");
+const msgInput = document.getElementById("msg");
+const sendBtn = document.getElementById("send");
+
+function log(message) {
+  logDiv.innerHTML += message + "<br>";
+  logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+// 🌍 Your Render WebSocket Signaling Server URL
+const ws = new WebSocket("wss://connection-zhjs.onrender.com");
+
+// WebRTC setup
+let pc = new RTCPeerConnection();
+let channel;
+
+// send WebRTC signaling data to server
+function signal(data) {
+  ws.send(JSON.stringify(data));
+}
+
+// receive WebRTC data from server
+ws.onmessage = async event => {
+  const data = JSON.parse(event.data);
+
+  if (data.sdp) {
+    await pc.setRemoteDescription(data.sdp);
+
+    if (data.sdp.type === "offer") {
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      signal({ sdp: pc.localDescription });
+    }
+  }
+
+  if (data.candidate) {
+    try { await pc.addIceCandidate(data.candidate); } catch {}
+  }
+};
+
+// ICE candidates → signaling server
+pc.onicecandidate = event => {
+  if (event.candidate) signal({ candidate: event.candidate });
+};
+
+// When receiving a data channel
+pc.ondatachannel = event => {
+  channel = event.channel;
+  initChannel();
+};
+
+// Create a data channel automatically (one peer will win the race)
+setTimeout(async () => {
+  if (pc.connectionState !== "new") return;
+  channel = pc.createDataChannel("chat");
+  initChannel();
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  signal({ sdp: pc.localDescription });
+}, Math.random() * 800);
+
+// Setup chat channel events
+function initChannel() {
+  channel.onopen = () => {
+    log("Connected ✔");
+    sendBtn.disabled = false;
+  };
+
+  channel.onmessage = e => log("Peer: " + e.data);
+
+  channel.onclose = () => {
+    log("Disconnected ❌");
+    sendBtn.disabled = true;
+  };
+}
+
+// Sending chat messages
+sendBtn.onclick = () => {
+  const text = msgInput.value;
+  if (!text || channel.readyState !== "open") return;
+  channel.send(text);
+  log("You: " + text);
+  msgInput.value = "";
+};
+
+// Enter key sends message
+msgInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") sendBtn.click();
+});
+</script>
+
+</body>
+</html>
